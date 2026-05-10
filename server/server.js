@@ -4,15 +4,14 @@ const cors = require('cors');
 const weatherRoutes = require('./routes/weatherRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-});
+
+const PORT = process.env.PORT || 8080; 
 
 app.use(cors());
 app.use(express.json());
+
 app.use('/api', weatherRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server successfully running on port ${PORT}`);
 });
