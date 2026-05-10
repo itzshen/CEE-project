@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
+const { PdfReader } = require('pdfreader');
 const fs = require('fs');
 
 const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
@@ -81,11 +82,48 @@ async function readFileContent(filePath, mimetype) {
   if (mimetype === 'text/plain') {
     return buffer.toString('utf-8');
   } else if (mimetype === 'application/pdf') {
-    const data = await pdfParse(buffer);
-    return data.text;
+    try {
+      const data = await pdfParse(buffer);
+      return data.text;
+    } catch (error) {
+      console.log('pdf-parse failed:', error.message);
+      
+      // Try PdfReader as fallback
+      if (error.message.includes('bad XRef entry') || error.message.includes('XRef') || 
+          error.message.includes('InvalidPDFException') || error.message.includes('FormatError')) {
+        try {
+          console.log('Trying PdfReader as fallback...');
+          const text = await parsePdfWithPdfReader(buffer);
+          return text;
+        } catch (fallbackError) {
+          console.log('PdfReader also failed:', fallbackError.message);
+          throw new Error('ไฟล์ PDF นี้มีปัญหาในการอ่าน (XRef table ไม่ถูกต้อง หรือไฟล์เสียหาย) กรุณาใช้ไฟล์ PDF ที่สร้างจากโปรแกรมมาตรฐาน หรือลองแปลงไฟล์เป็น TXT แทน');
+        }
+      } else {
+        throw new Error(`เกิดข้อผิดพลาดในการอ่านไฟล์ PDF: ${error.message}`);
+      }
+    }
   } else {
     throw new Error('Unsupported file type. Only PDF and TXT files are supported.');
   }
+}
+
+async function parsePdfWithPdfReader(buffer) {
+  return new Promise((resolve, reject) => {
+    const reader = new PdfReader();
+    let text = '';
+    
+    reader.parseBuffer(buffer, (err, item) => {
+      if (err) {
+        reject(err);
+      } else if (!item) {
+        // Parsing complete
+        resolve(text.trim());
+      } else if (item.text) {
+        text += item.text + ' ';
+      }
+    });
+  });
 }
 
 async function analyzeTripPlan(tripContent, city) {
