@@ -283,6 +283,12 @@ body {
   align-items: center;
 }
 
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .city-field {
   min-width: 180px;
   margin: 0;
@@ -311,6 +317,79 @@ body {
 .analysis-box p {
   margin: 0;
   line-height: 1.6;
+}
+
+.trip-analysis-section {
+  margin: 1.5rem 0 0.5rem;
+  padding: 1.25rem;
+  background: var(--secondary-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.trip-analysis-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: var(--text-h);
+}
+
+.trip-description {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.file-upload-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.file-input-label {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  min-width: 200px;
+  text-align: center;
+}
+
+.file-input-label:hover {
+  border-color: var(--accent);
+  background: var(--secondary-bg);
+}
+
+.file-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.file-input-text {
+  display: block;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trip-result {
+  margin-top: 1rem;
+  border-left: 4px solid var(--accent);
+}
+
+.trip-result h4 {
+  margin: 0 0 0.5rem;
+  color: var(--accent);
+  font-size: 1rem;
 }
 
 .error-banner {

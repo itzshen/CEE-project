@@ -80,28 +80,37 @@ export function WeatherDashboard() {
   const { theme } = useTheme(); // <-- NEW: Grab the current theme state
   const [query, setQuery] = useState('Bangkok');
   const [loading, setLoading] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [tripAnalysisLoading, setTripAnalysisLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [analysisError, setAnalysisError] = useState(null);
+  const [tripAnalysisError, setTripAnalysisError] = useState(null);
   const [daily, setDaily] = useState([]);
   const [meta, setMeta] = useState(null);
   const [advice, setAdvice] = useState('');
+  const [tripAnalysis, setTripAnalysis] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
   const fetchForecastRef = useRef(async () => {});
 
   const fetchForecast = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setAdvice('');
+    setAnalysisError(null);
+
     try {
-      const res = await fetch(`/api/forecast-analysis?q=${encodeURIComponent(query.trim() || 'London')}`);
+      const res = await fetch(`/api/forecast?q=${encodeURIComponent(query.trim() || 'London')}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || data.message || `Request failed (${res.status})`);
       }
+
       const list = data.list || [];
       setDaily(aggregateDailyData(list));
       setMeta({ city: data.city?.name || query, country: data.city?.country });
-      setAdvice(data.advice || '');
 
       if (forecastHasRain(list)) {
-        toast("Don't forget your umbrella! Rain expected.", { id: 'rain-reminder' , icon: '🌧️' , style : {minWidth: '375px'}});
+        toast("Don't forget your umbrella! Rain expected.", { id: 'rain-reminder', icon: '🌧️', style: { minWidth: '375px' } });
       } else {
         toast.dismiss('rain-reminder');
       }
@@ -114,6 +123,93 @@ export function WeatherDashboard() {
       setLoading(false);
     }
   }, [query]);
+
+  const fetchAnalysis = useCallback(async () => {
+    if (!query.trim()) {
+      setAnalysisError('กรุณาใส่ชื่อเมืองก่อนวิเคราะห์');
+      return;
+    }
+
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    setAdvice('');
+
+    try {
+      const res = await fetch(`/api/forecast-analysis?q=${encodeURIComponent(query.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Request failed (${res.status})`);
+      }
+
+      const list = data.list || [];
+      setDaily(aggregateDailyData(list));
+      setMeta({ city: data.city?.name || query, country: data.city?.country });
+      setAdvice(data.advice || 'ไม่สามารถวิเคราะห์ข้อมูลได้ในขณะนี้');
+
+      if (forecastHasRain(list)) {
+        toast("Don't forget your umbrella! Rain expected.", { id: 'rain-reminder', icon: '🌧️', style: { minWidth: '375px' } });
+      } else {
+        toast.dismiss('rain-reminder');
+      }
+    } catch (e) {
+      setAdvice('');
+      setAnalysisError(e.message || 'Could not load AI advice');
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }, [query]);
+
+  const handleFileUpload = useCallback(async () => {
+    if (!selectedFile) {
+      setTripAnalysisError('กรุณาเลือกไฟล์ก่อนอัปโหลด');
+      return;
+    }
+
+    setTripAnalysisLoading(true);
+    setTripAnalysisError(null);
+    setTripAnalysis('');
+
+    try {
+      const formData = new FormData();
+      formData.append('tripFile', selectedFile);
+      formData.append('city', query.trim() || 'Bangkok');
+
+      const res = await fetch('/api/analyze-trip', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Request failed (${res.status})`);
+      }
+
+      setTripAnalysis(data.analysis || 'ไม่สามารถวิเคราะห์แผนการเดินทางได้ในขณะนี้');
+      toast.success('วิเคราะห์แผนการเดินทางสำเร็จ!', { icon: '📋' });
+    } catch (e) {
+      setTripAnalysis('');
+      setTripAnalysisError(e.message || 'Could not analyze trip plan');
+      toast.error('เกิดข้อผิดพลาดในการวิเคราะห์แผนการเดินทาง');
+    } finally {
+      setTripAnalysisLoading(false);
+    }
+  }, [selectedFile, query]);
+
+  const handleFileChange = useCallback((e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) { // 10MB
+        setTripAnalysisError('ไฟล์มีขนาดใหญ่เกินไป (สูงสุด 10MB)');
+        return;
+      }
+      if (!['application/pdf', 'text/plain'].includes(file.type)) {
+        setTripAnalysisError('รองรับเฉพาะไฟล์ PDF และ TXT เท่านั้น');
+        return;
+      }
+      setSelectedFile(file);
+      setTripAnalysisError(null);
+    }
+  }, []);
 
   useEffect(() => {
     fetchForecastRef.current = fetchForecast;
@@ -272,9 +368,19 @@ export function WeatherDashboard() {
               aria-label="City name"
             />
           </label>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Loading…' : 'Load'}
-          </button>
+          <div className="button-group">
+            <button type="submit" className="btn btn-primary" disabled={loading || analysisLoading}>
+              {loading ? 'Loading…' : 'Load'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={fetchAnalysis}
+              disabled={analysisLoading || loading || !query.trim()}
+            >
+              {analysisLoading ? 'Analyzing…' : 'AI Analysis'}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -284,12 +390,51 @@ export function WeatherDashboard() {
             Showing forecast for <strong>{meta.city}</strong>
             {meta.country ? `, ${meta.country}` : ''}. Chart shows daily high temperatures, maximum cloud coverage, and total precipitation from the 5-day / 3-hour API.
           </p>
+          {analysisError && <p className="error-banner" role="alert">{analysisError}</p>}
           {advice && (
             <div className="analysis-box">
               <h3>AI วิเคราะห์สภาพอากาศ</h3>
               <p>{advice}</p>
             </div>
           )}
+
+          {/* Trip Plan Analysis Section */}
+          <div className="trip-analysis-section">
+            <h3>AI วิเคราะห์แผนการเดินทาง</h3>
+            <p className="trip-description">
+              อัปโหลดไฟล์ PDF หรือ TXT ที่มีแผนการเดินทาง/เที่ยว/งาน แล้ว AI จะวิเคราะห์และให้คำแนะนำการเตรียมตัวรับมือกับสภาพอากาศ
+            </p>
+
+            <div className="file-upload-area">
+              <label className="file-input-label">
+                <input
+                  type="file"
+                  accept=".pdf,.txt"
+                  onChange={handleFileChange}
+                  className="file-input"
+                />
+                <span className="file-input-text">
+                  {selectedFile ? `📄 ${selectedFile.name}` : 'เลือกไฟล์ PDF หรือ TXT'}
+                </span>
+              </label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleFileUpload}
+                disabled={tripAnalysisLoading || !selectedFile}
+              >
+                {tripAnalysisLoading ? 'กำลังวิเคราะห์…' : 'วิเคราะห์แผนการเดินทาง'}
+              </button>
+            </div>
+
+            {tripAnalysisError && <p className="error-banner" role="alert">{tripAnalysisError}</p>}
+            {tripAnalysis && (
+              <div className="analysis-box trip-result">
+                <h4>ผลการวิเคราะห์แผนการเดินทาง</h4>
+                <p>{tripAnalysis}</p>
+              </div>
+            )}
+          </div>
         </>
       )}
 

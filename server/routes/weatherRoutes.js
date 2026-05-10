@@ -1,9 +1,32 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const fs = require('fs');
 
 const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+console.log('Environment check:', {
+  WEATHER_API_KEY: !!WEATHER_API_KEY,
+  GEMINI_API_KEY: !!GEMINI_API_KEY,
+  GEMINI_MODEL
+});
+
+const upload = multer({
+  dest: 'uploads/',
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || file.mimetype === 'text/plain') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF and TXT files are allowed'));
+    }
+  }
+});
 
 function summarizeForecast(list) {
   const byDay = new Map();
@@ -52,6 +75,88 @@ function isGeminiQuotaError(errorBody) {
   return /RESOURCE_EXHAUSTED|quota|quota exceeded|generate_content_free_tier_requests|generate_content_free_tier_input_token_count/i.test(body);
 }
 
+async function readFileContent(filePath, mimetype) {
+  const buffer = fs.readFileSync(filePath);
+
+  if (mimetype === 'text/plain') {
+    return buffer.toString('utf-8');
+  } else if (mimetype === 'application/pdf') {
+    const data = await pdfParse(buffer);
+    return data.text;
+  } else {
+    throw new Error('Unsupported file type. Only PDF and TXT files are supported.');
+  }
+}
+
+async function analyzeTripPlan(tripContent, city) {
+  if (!GEMINI_API_KEY) {
+    return 'AI ยังไม่พร้อมใช้งาน';
+  }
+
+  const prompt = `คุณคือผู้เชี่ยวชาญด้านการเตรียมตัวสำหรับการเดินทางและสภาพอากาศ วิเคราะห์แผนการเดินทางต่อไปนี้และให้คำแนะนำการเตรียมตัวรับมือกับสภาพอากาศ:
+
+แผนการเดินทาง:
+${tripContent}
+
+เมืองปลายทาง: ${city}
+
+กรุณาวิเคราะห์:
+1. กิจกรรมหลักในแผนการเดินทาง
+2. ช่วงเวลาที่จะเดินทาง
+3. สิ่งที่ควรเตรียมตัวสำหรับสภาพอากาศในเมืองนี้
+4. คำแนะนำเฉพาะสำหรับกิจกรรมที่วางแผนไว้
+
+ให้คำแนะนำเป็นภาษาไทยแบบสั้นๆและมีประโยชน์ ไม่ต้องมีสัญลักษณ์ Markdown (ดอกจัน)`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }]
+      }),
+    });
+
+    const responseText = await response.text();
+    let data;
+
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error(`Gemini response parse error: ${parseError.message} \n${responseText}`);
+    }
+
+    if (!response.ok) {
+      if (isGeminiQuotaError(data)) {
+        return 'ขออภัย ระบบวิเคราะห์ AI ขัดข้อง (โควต้า AI หมด)';
+      }
+      throw new Error(`Gemini API error: ${response.status} ${responseText}`);
+    }
+
+    if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+      return data.candidates[0].content.parts[0].text.trim();
+    }
+
+    return 'ไม่สามารถวิเคราะห์ข้อมูลได้ในขณะนี้';
+  } catch (error) {
+    console.error('--- AI TRIP ANALYSIS ERROR ---');
+    console.error('Full Error:', error);
+    console.error('Message:', error.message);
+    if (error.stack) console.error('Stack:', error.stack);
+
+    if (isGeminiQuotaError(error.message)) {
+      return 'ขออภัย ระบบวิเคราะห์ AI ขัดข้อง (โควต้า AI หมด)';
+    }
+    return 'ขออภัย ระบบวิเคราะห์ AI ขัดข้อง';
+  }
+}
+
 async function generateWeatherAdvice(forecastData, city) {
   if (!GEMINI_API_KEY) {
     return 'AI ยังไม่พร้อมใช้งาน';
@@ -62,7 +167,7 @@ async function generateWeatherAdvice(forecastData, city) {
     return `${dayData.day}: ${dayData.tempMax}°C, clouds ${dayData.cloudsMax}%, rain ${dayData.precipitation}mm`;
   });
 
-  const prompt = `คุณคือผู้เชี่ยวชาญด้านสภาพอากาศ วิเคราะห์ข้อมูลเมือง ${city} ต่อไปนี้:\n${lines.join('\n')}\nช่วยแนะนำการแต่งกายและกิจกรรมเป็นภาษาไทยแบบสั้นๆ`;
+  const prompt = `คุณคือผู้เชี่ยวชาญด้านสภาพอากาศ วิเคราะห์ข้อมูลเมือง ${city} ต่อไปนี้:\n${lines.join('\n')}\nช่วยแนะนำการแต่งกายและกิจกรรมเป็นภาษาไทยแบบสั้นๆ ไม่ต้องมีสัญลักษณ์ Markdown (ดอกจัน)`;
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -186,6 +291,40 @@ router.get('/forecast-analysis', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/analyze-trip', upload.single('tripFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const city = req.body.city || 'Bangkok';
+    const filePath = req.file.path;
+
+    // Read file content
+    const fileContent = await readFileContent(filePath, req.file.mimetype);
+
+    // Clean up uploaded file
+    fs.unlinkSync(filePath);
+
+    if (!fileContent || fileContent.trim().length === 0) {
+      return res.status(400).json({ error: 'File is empty or could not be read' });
+    }
+
+    // Analyze trip plan
+    const analysis = await analyzeTripPlan(fileContent, city);
+
+    res.json({
+      city,
+      fileName: req.file.originalname,
+      analysis
+    });
+
+  } catch (err) {
+    console.error('Trip analysis error:', err);
+    res.status(500).json({ error: err.message || 'Failed to analyze trip plan' });
   }
 });
 
